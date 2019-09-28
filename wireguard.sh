@@ -369,7 +369,7 @@ set_firewall() {
         if [ "$(firewall-cmd --state | sed -r "s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[mGK]//g")" = "running" ]; then
             default_zone="$(firewall-cmd --get-default-zone)"
             if [ "$(firewall-cmd --zone=${default_zone} --query-masquerade)" = "no" ]; then
-                _error_detect "firewall-cmd --zone=${default_zone} --add-masquerade"
+                _error_detect "firewall-cmd --permanent --zone=${default_zone} --add-masquerade"
             fi
             if ! firewall-cmd --list-ports | grep -qw "${SERVER_WG_PORT}/udp"; then
                 _error_detect "firewall-cmd --permanent --zone=${default_zone} --add-port=${SERVER_WG_PORT}/udp"
@@ -424,7 +424,7 @@ install_completed() {
 
 add_client() {
     if ! _is_installed; then
-        _red "WireGuard looks like not installed, please installed it try again\n" && exit 1
+        _red "WireGuard was not installed, please install it and try again\n" && exit 1
     fi
     default_server_if="/etc/wireguard/${SERVER_WG_NIC}.conf"
     default_client_if="/etc/wireguard/${SERVER_WG_NIC}_client"
@@ -531,7 +531,7 @@ EOF
 
 remove_client() {
     if ! _is_installed; then
-        _red "WireGuard looks like not installed, please installed it try again\n" && exit 1
+        _red "WireGuard was not installed, please install it and try again\n" && exit 1
     fi
     default_server_if="/etc/wireguard/${SERVER_WG_NIC}.conf"
     [ ! -s "${default_server_if}" ] && echo "The default server interface ($(_red ${default_server_if})) does not exists" && exit 1
@@ -561,7 +561,7 @@ remove_client() {
 
 list_clients() {
     if ! _is_installed; then
-        _red "WireGuard looks like not installed, please installed it try again\n" && exit 1
+        _red "WireGuard was not installed, please install it and try again\n" && exit 1
     fi
     default_server_if="/etc/wireguard/${SERVER_WG_NIC}.conf"
     [ ! -s "${default_server_if}" ] && echo "The default server interface ($(_red ${default_server_if})) does not exists" && exit 1
@@ -592,27 +592,28 @@ check_version() {
     elif [ ${rt} -eq 1 ]; then
         _red "WireGuard kernel module does not exists\n" && return 1
     elif [ ${rt} -eq 2 ]; then
-        _red "WireGuard is not installed\n" && return 2
+        _red "WireGuard was not installed\n" && return 2
     fi
 }
 
 show_help() {
     printf "
-Usage: $0 [Options]
+Usage  : $0 [Options]
 Options:
--h, --help       Print this help text and exit
--r, --repo       Install WireGuard from repository
--s, --source     Install WireGuard from source
--u, --update     Upgrade WireGuard from source
--v, --version    Print WireGuard version if installed
--a, --add        Add a WireGuard client
--d, --del        Delete a WireGuard client
--l, --list       List all WireGuard client's IP
+        -h, --help       Print this help text and exit
+        -r, --repo       Install WireGuard from repository
+        -s, --source     Install WireGuard from source
+        -u, --update     Upgrade WireGuard from source
+        -v, --version    Print WireGuard version if installed
+        -a, --add        Add a WireGuard client
+        -d, --del        Delete a WireGuard client
+        -l, --list       List all WireGuard client's IP
 
 "
 }
 
 install_from_repo() {
+    _is_installed && check_version && _red "WireGuard was already installed\n" && exit 0
     check_os
     install_wg_1
     create_server_if
@@ -624,6 +625,7 @@ install_from_repo() {
 }
 
 install_from_source() {
+    _is_installed && check_version && _red "WireGuard was already installed\n" && exit 0
     check_os
     install_wg_2
     create_server_if
@@ -635,29 +637,26 @@ install_from_source() {
 }
 
 update_from_source() {
-    if check_version; then
+    if check_version > /dev/null 2>&1; then
         _get_latest_ver
-        echo "WireGuard latest version: $(_green ${wireguard_ver})"
+        _info "WireGuard version: $(_green ${installed_wg_ver})"
+        _info "WireGuard latest version: $(_green ${wireguard_ver})"
         if _version_gt "${wireguard_ver}" "${installed_wg_ver}"; then
-            echo "Do you want to upgrade WireGuard? (y/n)"
-            read -p "(Default: n):" update_wg
-            [ -z "${update_wg}" ] && update_wg="n"
-            if [ "${update_wg}" = "y" -o "${update_wg}" = "Y" ]; then
-                install_wg_2
-                systemctl restart wg-quick@${SERVER_WG_NIC}
-                echo "Update WireGuard completed"
-            else
-                echo "Update WireGuard canceled"
-            fi
+            _info "Starting upgrade WireGuard"
+            install_wg_2
+            _error_detect "systemctl restart wg-quick@${SERVER_WG_NIC}"
+            _info "Update WireGuard completed"
         else
-            echo "No updates needed to update WireGuard"
+            _info "There is no update available for WireGuard"
         fi
+    else
+        _red "WireGuard was not installed, maybe you need to install it at first\n"
     fi
 }
 
 cur_dir="$(pwd)"
 
-[ ${EUID} -ne 0 ] && _error "This script must be run as root"
+[ ${EUID} -ne 0 ] && _red "This script must be run as root\n" && exit 1
 
 SERVER_PUB_IPV4="${VPN_SERVER_PUB_IPV4:-$(_ipv4)}"
 SERVER_PUB_IPV6="${VPN_SERVER_PUB_IPV6:-$(_ipv6)}"
