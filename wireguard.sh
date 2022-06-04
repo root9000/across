@@ -92,8 +92,7 @@ _nic() {
 
 _port() {
     local port="$(shuf -i 1024-20480 -n 1)"
-    while true
-    do
+    while true; do
         if _exists "netstat" && netstat -tunlp | grep -w "${port}" > /dev/null 2>&1; then
             port="$(shuf -i 1024-20480 -n 1)"
         else
@@ -146,6 +145,8 @@ _is_installed() {
     if [ -s "/lib/modules/$(uname -r)/extra/wireguard.ko" ] \
     || [ -s "/lib/modules/$(uname -r)/extra/wireguard.ko.xz" ] \
     || [ -s "/lib/modules/$(uname -r)/updates/dkms/wireguard.ko" ] \
+    || [ -s "/lib/modules/$(uname -r)/updates/dkms/wireguard.ko.xz" ] \
+    || [ -s "/lib/modules/$(uname -r)/kernel/wireguard/wireguard.ko" ] \
     || [ -s "/lib/modules/$(uname -r)/kernel/drivers/net/wireguard/wireguard.ko" ] \
     || [ -s "/lib/modules/$(uname -r)/kernel/drivers/net/wireguard/wireguard.ko.xz" ]; then
         install_flag[1]=1
@@ -193,10 +194,10 @@ check_os() {
         virt="$(systemd-detect-virt)"
     fi
     if [ -n "${virt}" -a "${virt}" = "lxc" ]; then
-        _error "Virtualization method is LXC, which is not supported."
+        _error "Virtualization is LXC, which is not supported."
     fi
     if [ -n "${virt}" -a "${virt}" = "openvz" ] || [ -d "/proc/vz" ]; then
-        _error "Virtualization method is OpenVZ, which is not supported."
+        _error "Virtualization is OpenVZ, which is not supported."
     fi
     [ -z "$(_os)" ] && _error "Not supported OS"
     case "$(_os)" in
@@ -268,6 +269,13 @@ install_wg_pkgs() {
             _error_detect "apt-get -y install make"
             _error_detect "apt-get -y install libmnl-dev"
             _error_detect "apt-get -y install libelf-dev"
+            if [ ! -d "/usr/src/linux-headers-$(uname -r)" ]; then
+                if [ "$(_os)" = "raspbian" ]; then
+                    _error_detect "apt-get -y install raspberrypi-kernel-headers"
+                else
+                    _error_detect "apt-get -y install linux-headers-$(uname -r)"
+                fi
+            fi
             ;;
         fedora)
             _error_detect "dnf -y install qrencode"
@@ -276,6 +284,7 @@ install_wg_pkgs() {
             _error_detect "dnf -y install make"
             _error_detect "dnf -y install libmnl-devel"
             _error_detect "dnf -y install elfutils-libelf-devel"
+            [ ! -d "/usr/src/kernels/$(uname -r)" ] && _error_detect "dnf -y install kernel-headers" && _error_detect "dnf -y install kernel-devel"
             ;;
         centos)
             _error_detect "yum -y install epel-release"
@@ -284,9 +293,12 @@ install_wg_pkgs() {
             _error_detect "yum -y install gcc"
             _error_detect "yum -y install make"
             _error_detect "yum -y install yum-utils"
-            [ -n "$(_os_ver)" -a "$(_os_ver)" -eq 8 ] && _error_detect "yum-config-manager --enable PowerTools"
+            if [ -n "$(_os_ver)" -a "$(_os_ver)" -eq 8 ]; then
+                yum-config-manager --enable PowerTools > /dev/null 2>&1 || yum-config-manager --enable powertools > /dev/null 2>&1
+            fi
             _error_detect "yum -y install libmnl-devel"
             _error_detect "yum -y install elfutils-libelf-devel"
+            [ ! -d "/usr/src/kernels/$(uname -r)" ] && _error_detect "yum -y install kernel-headers" && _error_detect "yum -y install kernel-devel"
             ;;
         *)
             ;; # do nothing
@@ -299,26 +311,22 @@ install_wg_1() {
     _info "Install wireguard from repository"
     case "$(_os)" in
         ubuntu)
-            _error_detect "add-apt-repository ppa:wireguard/wireguard"
             _error_detect "apt-get update"
-            _error_detect "apt-get -y install linux-headers-$(uname -r)"
-            _error_detect "apt-get -y install wireguard-dkms"
-            _error_detect "apt-get -y install wireguard-tools"
+            _error_detect "apt-get -y install wireguard"
             ;;
         debian)
             echo "deb http://deb.debian.org/debian/ unstable main" > /etc/apt/sources.list.d/unstable.list
             printf 'Package: *\nPin: release a=unstable\nPin-Priority: 90\n' > /etc/apt/preferences.d/limit-unstable
             _error_detect "apt-get update"
-            _error_detect "apt-get -y install linux-headers-$(uname -r)"
-            _error_detect "apt-get -y install wireguard-dkms"
-            _error_detect "apt-get -y install wireguard-tools"
+            _error_detect "apt-get -y install wireguard"
             ;;
         fedora)
-            _error_detect "dnf -y copr enable jdoss/wireguard"
-            _error_detect "dnf -y install kernel-devel"
-            _error_detect "dnf -y install kernel-headers"
-            _error_detect "dnf -y install wireguard-dkms"
-            _error_detect "dnf -y install wireguard-tools"
+            if [ -n "$(_os_ver)" -a "$(_os_ver)" -lt 31 ]; then
+                _error_detect "dnf -y copr enable jdoss/wireguard"
+                _error_detect "dnf -y install wireguard-dkms wireguard-tools"
+            else
+                _error_detect "dnf -y install wireguard-tools"
+            fi
             ;;
         centos)
             if [ -n "$(_os_ver)" -a "$(_os_ver)" -eq 7 ]; then
@@ -327,8 +335,6 @@ install_wg_1() {
             if [ -n "$(_os_ver)" -a "$(_os_ver)" -eq 8 ]; then
                 _error_detect "curl -Lso /etc/yum.repos.d/wireguard.repo https://copr.fedorainfracloud.org/coprs/jdoss/wireguard/repo/epel-8/jdoss-wireguard-epel-8.repo"
             fi
-            _error_detect "yum -y install kernel-devel"
-            _error_detect "yum -y install kernel-headers"
             _error_detect "yum -y install wireguard-dkms"
             _error_detect "yum -y install wireguard-tools"
             ;;
@@ -341,25 +347,6 @@ install_wg_1() {
 install_wg_2() {
     install_wg_pkgs
     _info "Install wireguard from source"
-    case "$(_os)" in
-        ubuntu|debian|raspbian)
-            if [ ! -d "/usr/src/linux-headers-$(uname -r)" ]; then
-                if [ "$(_os)" = "raspbian" ]; then
-                    _error_detect "apt-get -y install raspberrypi-kernel-headers"
-                else
-                    _error_detect "apt-get -y install linux-headers-$(uname -r)"
-                fi
-            fi
-            ;;
-        fedora)
-            [ ! -d "/usr/src/kernels/$(uname -r)" ] && _error_detect "dnf -y install kernel-headers" && _error_detect "dnf -y install kernel-devel"
-            ;;
-        centos)
-            [ ! -d "/usr/src/kernels/$(uname -r)" ] && _error_detect "yum -y install kernel-headers" && _error_detect "yum -y install kernel-devel"
-            ;;
-        *)
-            ;; # do nothing
-    esac
     install_wg_module
     install_wg_tools
 }
@@ -372,17 +359,21 @@ install_wg_3() {
         ubuntu)
             _error_detect "add-apt-repository ppa:wireguard/wireguard"
             _error_detect "apt-get update"
-            _error_detect "apt-get -y install wireguard-tools"
+            _error_detect "apt-get -y install --no-install-recommends wireguard-tools"
             ;;
         debian)
             echo "deb http://deb.debian.org/debian/ unstable main" > /etc/apt/sources.list.d/unstable.list
             printf 'Package: *\nPin: release a=unstable\nPin-Priority: 90\n' > /etc/apt/preferences.d/limit-unstable
             _error_detect "apt-get update"
-            _error_detect "apt-get -y install wireguard-tools"
+            _error_detect "apt-get -y install --no-install-recommends wireguard-tools"
             ;;
         fedora)
-            _error_detect "dnf -y copr enable jdoss/wireguard"
-            _error_detect "dnf -y install wireguard-tools"
+            if [ -n "$(_os_ver)" -a "$(_os_ver)" -lt 31 ]; then
+                _error_detect "dnf -y copr enable jdoss/wireguard"
+                _error_detect "dnf -y install wireguard-tools"
+            else
+                _error_detect "dnf -y install wireguard-tools"
+            fi
             ;;
         centos)
             if [ -n "$(_os_ver)" -a "$(_os_ver)" -eq 7 ]; then
@@ -462,6 +453,7 @@ PrivateKey = ${SERVER_PRIVATE_KEY}
 PublicKey = ${CLIENT_PUBLIC_KEY}
 AllowedIPs = ${CLIENT_WG_IPV4}/32,${CLIENT_WG_IPV6}/128
 PresharedKey = ${CLIENT_PRE_SHARED_KEY}
+PersistentKeepalive = 25
 EOF
     else
         cat > /etc/wireguard/${SERVER_WG_NIC}.conf <<EOF
@@ -474,6 +466,7 @@ PrivateKey = ${SERVER_PRIVATE_KEY}
 PublicKey = ${CLIENT_PUBLIC_KEY}
 AllowedIPs = ${CLIENT_WG_IPV4}/32
 PresharedKey = ${CLIENT_PRE_SHARED_KEY}
+PersistentKeepalive = 25
 EOF
     fi
     chmod 600 /etc/wireguard/${SERVER_WG_NIC}.conf
@@ -606,8 +599,7 @@ add_client() {
     default_client_if="/etc/wireguard/${SERVER_WG_NIC}_client"
     [ ! -s "${default_server_if}" ] && echo "The default server interface ($(_red ${default_server_if})) does not exists" && exit 1
     [ ! -s "${default_client_if}" ] && echo "The default client interface ($(_red ${default_client_if})) does not exists" && exit 1
-    while true
-    do
+    while true; do
         read -p "Please enter a client name (for example: wg1):" client
         if [ -z "${client}" ]; then
             _red "Client name can not be empty\n"
@@ -668,6 +660,7 @@ EOF
 PublicKey = ${CLIENT_PUBLIC_KEY}
 AllowedIPs = ${CLIENT_WG_IPV4}/32,${CLIENT_WG_IPV6}/128
 PresharedKey = ${CLIENT_PRE_SHARED_KEY}
+PersistentKeepalive = 25
 EOF
     else
         cat > ${new_client_if} <<EOF
@@ -688,6 +681,7 @@ EOF
 PublicKey = ${CLIENT_PUBLIC_KEY}
 AllowedIPs = ${CLIENT_WG_IPV4}/32
 PresharedKey = ${CLIENT_PRE_SHARED_KEY}
+PersistentKeepalive = 25
 EOF
     fi
     chmod 600 ${new_client_if}
@@ -711,8 +705,7 @@ remove_client() {
     fi
     default_server_if="/etc/wireguard/${SERVER_WG_NIC}.conf"
     [ ! -s "${default_server_if}" ] && echo "The default server interface ($(_red ${default_server_if})) does not exists" && exit 1
-    while true
-    do
+    while true; do
         read -p "Please enter a client name you want to delete it (for example: wg1):" client
         if [ -z "${client}" ]; then
             _red "Client name can not be empty\n"
