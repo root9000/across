@@ -524,8 +524,8 @@ check_writable
 export LC_ALL=C
 
 # check for curl/wget
-_exists "curl" && ip_check_cmd="curl -s -m 4"
 _exists "wget" && ip_check_cmd="wget -qO- -T 4"
+_exists "curl" && ip_check_cmd="curl -s -m 4"
 
 # Test IPv4/IPv6 connectivity
 ipv4_check=$( (ping -4 -c 1 -W 4 ipv4.google.com >/dev/null 2>&1 && echo true) || ${ip_check_cmd} -4 http://icanhazip.com 2>/dev/null)
